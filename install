@@ -1,4 +1,12 @@
 #!/bin/bash
+set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
 
-# Build docker image
-docker build -q=true -t hughfletcher/mysql github.com/hughfletcher/dokku-mysql-dockerfiles
+# Check if the image already exists
+if [ grep -q hughfletcher/mysql1 /var/lib/docker/repositories-aufs ]; then
+  echo "-----> building mysql"
+  if [[ $DOKKU_TRACE ]]; then
+    docker build -t hughfletcher/mysql github.com/hughfletcher/dokku-mysql-dockerfiles
+  else
+    docker build -q=true -t hughfletcher/mysql github.com/hughfletcher/dokku-mysql-dockerfiles
+  fi
+fi

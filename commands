@@ -1,5 +1,6 @@
 #!/bin/bash
-set -e; 
+set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+source "$(dirname $0)/../common/functions"
 
 # Check if name is specified
 if [[ $1 == mysql:* ]]; then
@@ -8,12 +9,6 @@ if [[ $1 == mysql:* ]]; then
         exit 1
     else
         APP="$2"
-        # Check if app exists with the same name
-        if [[ -d "/home/git/$APP" ]]; then
-            APP_EXISTS=true
-        else
-            APP_EXISTS=false
-        fi
     fi
 fi
 
@@ -35,22 +30,21 @@ case "$1" in
     else
         VOLUME="/var/lib/mysql"
         # Generate a random password for DB user
-        DB_PASS=$(< /dev/urandom tr -dc A-Za-z0-9 | head -c 16)
+        DB_PASS="debug-pass" #$(< /dev/urandom tr -dc A-Za-z0-9 | head -c 16)
         # DB_NAME=$(echo "www.atomic24.com" | sed -e 's/\.//g')
         # DB_USER='user'$RANDOM
         # Temporarily store it to a file
-        if [[ ! -d /home/git/.mysql ]]; then
-            mkdir -p /home/git/.mysql
-            chown -R git: /home/git/.mysql
+	echo DEBUG: temp dir check
+        if [[ ! -d ~/.dokku-mysql ]]; then
+            mkdir -p ~/.dokku-mysql
         fi
-        echo $DB_PASS > "/home/git/.mysql/pwd_$APP"
-        chown git: "/home/git/.mysql/pwd_$APP"
+        echo $DB_PASS > ~/.dokku-mysql/pwd_$APP
     fi
     # Fork DB image
-    ID=$(docker run -d hughfletcher/mysql exit 0)    
+    ID=$(docker run -d hughfletcher/mysql /bin/sh exit 0)    
     docker wait $ID > /dev/null
     IMAGE=$(docker commit $ID)
-    docker tag $IMAGE $DB_IMAGE
+    docker tag -f $IMAGE $DB_IMAGE
     # Launch container
     ID=$(docker run -v $VOLUME -d $DB_IMAGE /usr/sbin/mysqld)
 
@@ -62,12 +56,13 @@ case "$1" in
         # docker run mysql/create mysql -h $IP -u admin -p'newpass' -e "RENAME USER admin@'%' TO $DB_USER@'%';" 
         
         # Rename persistent volume
-        VOLUME_PATH=$(docker inspect $ID | grep "/var/lib/docker/volumes/" | awk '{print $2}' | sed -e"s/\/layer//" | sed -e's/"//g')
-        mv $VOLUME_PATH "/var/lib/docker/volumes/mysql-$APP"
-        sleep 1
+        # VOLUME_PATH=$(docker inspect $ID | grep "/var/lib/docker/volumes/" | awk '{print $2}' | sed -e"s/\/layer//" | sed -e's/"//g')
+        # mv $VOLUME_PATH "/var/lib/docker/volumes/mysql-$APP"
+        # sleep 1
     fi
     # Link to a potential existing app
-    dokku mysql:link $APP $APP
+    # debug
+    #dokku mysql:link $APP $APP
     echo
     echo "-----> MySql container created: $DB_IMAGE"
     sleep 1
@@ -103,8 +98,8 @@ case "$1" in
     echo
     echo "       Host: $IP"
     echo "       User: 'admin'"
-    if [[ -f "/home/git/.mysql/pwd_$APP" ]]; then
-        echo "       Password: '$(cat "/home/git/.mysql/pwd_$APP")'"
+    if [[ -f "~/.dokku-mysql/pwd_$APP" ]]; then
+        echo "       Password: '$(cat "~/.dokku-mysql/pwd_$APP")'"
     fi
     echo "       Database: 'db'"
     # echo "       Public port: $PORT"
@@ -113,7 +108,7 @@ case "$1" in
     ;;
 
   mysql:link)
-    if $APP_EXISTS; then
+    if [[ verify_app_name ]]; then
         # Check argument
         if [[ -z $3 ]]; then
             echo "You must specify a database name"
@@ -121,11 +116,11 @@ case "$1" in
         fi
         DB_IMAGE="mysql/$3"
         # Check temporarily file
-        if [[ ! -f "/home/git/.mysql/pwd_$APP" ]]; then
+        if [[ ! -f "~/.dokku-mysql/pwd_$APP" ]]; then
             echo "Database is already linked"
             exit 1
         fi
-        DB_PASSWORD=$(cat "/home/git/.mysql/pwd_$APP")
+        DB_PASSWORD=$(cat "~/.dokku-mysql/pwd_$APP")
         ID=$(docker ps -a | grep "$DB_IMAGE":latest |  awk '{print $1}')
         IP=$(docker inspect $ID | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
         # Write database connection vars to app's ENV file
@@ -159,12 +154,16 @@ case "$1" in
 
   help)
     cat && cat<<EOF
-    mysql:create <app>     Create a MySql container
-    mysql:delete <app>     Delete specified MySql container
-    mysql:info <app>       Display database informations
-    mysql:link <app> <db>  Link an app to a MySql database
-    mysql:logs <app>       Display last logs from MySql container
+    mysql:create <app>, Create a MySql container
+    mysql:delete <app>, Delete specified MySql container
+    mysql:info <app>, Display database informations
+    mysql:link <app> <db>, Link an app to a MySql database
+    mysql:logs <app>, Display last logs from MySql container
 EOF
+    ;;
+
+  mysql:*)
+    exit $DOKKU_NOT_IMPLEMENTED_EXIT
     ;;
 
 esac
